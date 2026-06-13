@@ -14,9 +14,7 @@ uv_venv(PROJECTFILE pyproject.toml)
 add_custom_command(
   OUTPUT "${venv_dir}/.rvo2_built"
   DEPENDS "${venv_dir}/.built"
-  COMMAND ${venv_clean_pythonpath} "${venv_python_bin}" -m pip install
-    "git+https://github.com/sybrenstuvel/Python-RVO2.git@b272b378e0a3bd4a6f1c7be6531a2fa14a7d5c80#egg=Python-RVO2"
-    --no-build-isolation
+  COMMAND sh -c "export PYTHONPATH='' && . '${venv_dir}/bin/activate' && uv pip install --no-build-isolation 'git+https://github.com/sybrenstuvel/Python-RVO2.git@b272b378e0a3bd4a6f1c7be6531a2fa14a7d5c80'"
   COMMAND ${CMAKE_COMMAND} -E touch "${venv_dir}/.rvo2_built"
   VERBATIM
 )
