@@ -1,0 +1,27 @@
+action_type: differential_drive
+sensor_needs: []
+obs_policy: latest_only
+
+observations:
+  aliases:
+    robot_pose: robot_pose_from_tf
+
+  datasources:
+    robot_pose_from_tf:
+      type: RobotPoseTFGenerator
+      params: {}
+
+    robot_state:
+      type: nav_msgs/Odometry
+      params:
+        topic: odom
+
+    pedestrians:
+      type: arena_people_msgs/Pedestrians
+      params:
+        topic: pedestrians
+
+    goal_pose:
+      type: geometry_msgs/PoseStamped
+      params:
+        topic: goal_pose

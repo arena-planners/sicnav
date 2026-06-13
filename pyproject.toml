@@ -1,0 +1,27 @@
+[project]
+name = "arena_planners_sicnav"
+version = "0.0.0"
+description = "SICNav (bilevel-MPC) planner adapter for arena_planners bridge."
+requires-python = ">=3.8,<3.9"
+dependencies = [
+    "arena_planners",
+    "casadi==3.7.0",
+    "numpy==1.24.4",
+    "cython==0.29.33",
+    "scipy>=1.7",
+    "pyyaml==6.0.2",
+    "easydict==1.13",
+    "matplotlib==3.7.5",
+    "pandas",
+    "tqdm",
+]
+
+[tool.uv.sources]
+arena_planners = { git = "https://github.com/arena-planners/arena_planners.git", branch = "jazzy", subdirectory = "arena_planners" }
+
+[tool.setuptools]
+packages = []
+py-modules = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["sicnav", "crowd_sim_plus"]
