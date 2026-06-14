@@ -93,7 +93,8 @@ def _make_joint_state(features: dict) -> FullyObservableJointState | None:
     self_state = FullState(px, py, vx, vy, _ROBOT_RADIUS, gx, gy, _V_PREF, theta)
 
     humans: list[tuple[float, ObservableState]] = []
-    for ped in features.get("pedestrians") or []:
+    _peds = features.get("pedestrians")
+    for ped in (() if _peds is None else _peds):
         hpx, hpy = float(ped[1]), float(ped[2])
         hvx, hvy = float(ped[3]), float(ped[4])
         dist = float(np.hypot(hpx - px, hpy - py))
