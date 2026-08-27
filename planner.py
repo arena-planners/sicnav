@@ -26,7 +26,7 @@ sys.path.insert(0, str(_HERE))
 from crowd_sim_plus.envs.utils.human_plus import Human  # noqa: E402
 from crowd_sim_plus.envs.utils.state_plus import (  # noqa: E402
     FullState,
-    FullyObservableJointState,
+    JointState,
     ObservableState,
 )
 from sicnav.policy.campc import CollisionAvoidMPC  # noqa: E402
@@ -77,7 +77,7 @@ def _build_policy(config: configparser.RawConfigParser) -> CollisionAvoidMPC:
     return policy
 
 
-def _make_joint_state(features: dict) -> FullyObservableJointState | None:
+def _make_joint_state(features: dict) -> JointState | None:
     robot_pose = features.get("robot_pose")
     robot_state = features.get("robot_state")
     goal_pose = features.get("goal_pose")
@@ -102,7 +102,7 @@ def _make_joint_state(features: dict) -> FullyObservableJointState | None:
     humans.sort(key=lambda t: t[0])
     human_states = [h for _, h in humans[:_MAX_NUM_HUMS]]
 
-    return FullyObservableJointState(
+    return JointState(
         self_state=self_state,
         human_states=human_states,
         static_obs=[],
