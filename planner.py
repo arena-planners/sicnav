@@ -53,6 +53,7 @@ class _DummyEnv:
         self.config = config
         self.global_time = 0.0
         self.time_step = _TIME_STEP
+        self.sim_env = ""
 
     def set_human_observability(self, _observable: bool) -> None:
         return
