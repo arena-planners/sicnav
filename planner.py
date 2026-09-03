@@ -26,6 +26,7 @@ sys.path.insert(0, str(_HERE))
 from crowd_sim_plus.envs.utils.human_plus import Human  # noqa: E402
 from crowd_sim_plus.envs.utils.state_plus import (  # noqa: E402
     FullState,
+    FullyObservableJointState,
     JointState,
     ObservableState,
 )
@@ -37,9 +38,11 @@ _HUMAN_RADIUS: float = 0.35
 _V_PREF: float = 0.9
 _MAX_SPEED: float = 0.95
 _MAX_NUM_HUMS: int = 2
+_DUMMY_HUMAN_DIST: float = 50.0
+_WARMUP_GOAL_DIST: float = 5.0
 
 _policy: CollisionAvoidMPC | None = None
-_built_num_hums: int | None = None
+_pending_scenario_reset: bool = True
 
 
 class _DummyEnv:
@@ -78,6 +81,64 @@ def _build_policy(config: configparser.RawConfigParser) -> CollisionAvoidMPC:
     return policy
 
 
+def _dummy_human_state(px: float, py: float, gx: float, gy: float) -> ObservableState:
+    dx, dy = px - gx, py - gy
+    dist = float(np.hypot(dx, dy))
+    ux, uy = (1.0, 0.0) if dist < 1e-6 else (dx / dist, dy / dist)
+    return ObservableState(px + ux * _DUMMY_HUMAN_DIST, py + uy * _DUMMY_HUMAN_DIST, 0.0, 0.0, _HUMAN_RADIUS)
+
+
+def _pad_human_states(
+    human_states: list[ObservableState], px: float, py: float, gx: float, gy: float
+) -> list[ObservableState]:
+    padded = list(human_states[:_MAX_NUM_HUMS])
+    while len(padded) < _MAX_NUM_HUMS:
+        padded.append(_dummy_human_state(px, py, gx, gy))
+    return padded
+
+
+def _warm_up_state() -> JointState:
+    self_state = FullState(0.0, 0.0, 0.0, 0.0, _ROBOT_RADIUS, _WARMUP_GOAL_DIST, 0.0, _V_PREF, 0.0)
+    human_states = _pad_human_states([], 0.0, 0.0, _WARMUP_GOAL_DIST, 0.0)
+    return JointState(self_state=self_state, human_states=human_states, static_obs=[])
+
+
+def _human_tracking_state(policy: CollisionAvoidMPC, joint_state: JointState) -> JointState:
+    """Reproduce campc.predict's non-privileged state wrap, for reset_humans calls."""
+    if policy.priviledged_info:
+        return joint_state
+    human_states = [
+        FullState(
+            px=hum.px,
+            py=hum.py,
+            vx=hum.vx,
+            vy=hum.vy,
+            gx=hum.px + hum.vx * 2,
+            gy=hum.py + hum.vy * 2,
+            v_pref=policy.human_max_speed,
+            theta=float(np.arctan2(hum.vy, hum.vx)),
+            radius=hum.radius,
+        )
+        for hum in joint_state.human_states
+    ]
+    return FullyObservableJointState(
+        self_state=joint_state.self_state,
+        human_states=human_states,
+        static_obs=joint_state.static_obs,
+    )
+
+
+def _ensure_policy() -> CollisionAvoidMPC:
+    global _policy
+    if _policy is None:
+        policy = _build_policy(_load_config())
+        policy.predict(_warm_up_state())
+        policy.env.global_time = 1.0
+        policy.reset_scenario_values()
+        _policy = policy
+    return _policy
+
+
 def _make_joint_state(features: dict) -> JointState | None:
     robot_pose = features.get("robot_pose")
     robot_state = features.get("robot_state")
@@ -101,7 +162,7 @@ def _make_joint_state(features: dict) -> JointState | None:
         dist = float(np.hypot(hpx - px, hpy - py))
         humans.append((dist, ObservableState(hpx, hpy, hvx, hvy, _HUMAN_RADIUS)))
     humans.sort(key=lambda t: t[0])
-    human_states = [h for _, h in humans[:_MAX_NUM_HUMS]]
+    human_states = _pad_human_states([h for _, h in humans[:_MAX_NUM_HUMS]], px, py, gx, gy)
 
     return JointState(
         self_state=self_state,
@@ -112,34 +173,22 @@ def _make_joint_state(features: dict) -> JointState | None:
 
 def step(features: dict) -> list[float]:
     """Map features to a SICNav bilevel-MPC action, return [v, omega]."""
-    global _policy, _built_num_hums
-    if _policy is None:
-        _policy = _build_policy(_load_config())
+    global _pending_scenario_reset
+    policy = _ensure_policy()
 
     joint_state = _make_joint_state(features)
     if joint_state is None:
         return [0.0, 0.0]
 
-    num_hums = len(joint_state.human_states)
-    if not num_hums:
-        sx = joint_state.self_state
-        dx, dy = sx.gx - sx.px, sx.gy - sx.py
-        dist = float(np.hypot(dx, dy))
-        if dist < 1e-6:
-            return [0.0, 0.0]
-        v = min(_V_PREF, dist)
-        omega = float(np.arctan2(dy, dx) - sx.theta)
-        omega = (omega + np.pi) % (2 * np.pi) - np.pi
-        return [v, max(-1.0, min(1.0, omega))]
+    if _pending_scenario_reset:
+        tracking_state = _human_tracking_state(policy, joint_state)
+        policy.mpc_env.callback_orca.reset_humans(tracking_state)
+        policy.mpc_env.casadi_orca.reset_humans(tracking_state)
+        policy.reset_scenario_values()
+        _pending_scenario_reset = False
 
-    if _built_num_hums != num_hums:
-        _policy.num_hums = num_hums
-        _policy.mpc_env = None
-        _policy.env.global_time = 0.0
-        _built_num_hums = num_hums
-        return [0.0, 0.0]
-
-    action = _policy.predict(joint_state)
+    policy.gen_ref_traj(joint_state)
+    action = policy.predict(joint_state)
     omega = float(action.r) / _TIME_STEP
     v = float(action.v)
     if not (np.isfinite(v) and np.isfinite(omega)):
@@ -148,13 +197,11 @@ def step(features: dict) -> list[float]:
 
 
 def on_reset(episode_id: str, initial_state: dict | None) -> None:
-    global _policy, _built_num_hums
-    if _policy is not None:
-        _policy.mpc_env = None
-        _policy.env.global_time = 0.0
-    _built_num_hums = None
+    global _pending_scenario_reset
+    _pending_scenario_reset = True
 
 
 if __name__ == "__main__":
     manifest = load_manifest(_HERE / "planner.yaml")
+    _ensure_policy()
     main_loop(step, manifest=manifest, on_reset=on_reset)
