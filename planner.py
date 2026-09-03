@@ -39,6 +39,7 @@ _V_PREF: float = 0.9
 _MAX_SPEED: float = 0.95
 _MAX_NUM_HUMS: int = 2
 _DUMMY_HUMAN_DIST: float = 50.0
+_DUMMY_HUMAN_SPACING: float = 5.0
 _WARMUP_GOAL_DIST: float = 5.0
 
 _policy: CollisionAvoidMPC | None = None
@@ -81,11 +82,18 @@ def _build_policy(config: configparser.RawConfigParser) -> CollisionAvoidMPC:
     return policy
 
 
-def _dummy_human_state(px: float, py: float, gx: float, gy: float) -> ObservableState:
+def _dummy_human_state(px: float, py: float, gx: float, gy: float, slot: int) -> ObservableState:
     dx, dy = px - gx, py - gy
     dist = float(np.hypot(dx, dy))
     ux, uy = (1.0, 0.0) if dist < 1e-6 else (dx / dist, dy / dist)
-    return ObservableState(px + ux * _DUMMY_HUMAN_DIST, py + uy * _DUMMY_HUMAN_DIST, 0.0, 0.0, _HUMAN_RADIUS)
+    lateral = _DUMMY_HUMAN_SPACING * slot
+    return ObservableState(
+        px + ux * _DUMMY_HUMAN_DIST - uy * lateral,
+        py + uy * _DUMMY_HUMAN_DIST + ux * lateral,
+        0.0,
+        0.0,
+        _HUMAN_RADIUS,
+    )
 
 
 def _pad_human_states(
@@ -93,7 +101,7 @@ def _pad_human_states(
 ) -> list[ObservableState]:
     padded = list(human_states[:_MAX_NUM_HUMS])
     while len(padded) < _MAX_NUM_HUMS:
-        padded.append(_dummy_human_state(px, py, gx, gy))
+        padded.append(_dummy_human_state(px, py, gx, gy, len(padded)))
     return padded
 
 
@@ -187,7 +195,7 @@ def step(features: dict) -> list[float]:
         policy.reset_scenario_values()
         _pending_scenario_reset = False
 
-    policy.gen_ref_traj(joint_state)
+    policy.gen_ref_traj(_human_tracking_state(policy, joint_state))
     action = policy.predict(joint_state)
     omega = float(action.r) / _TIME_STEP
     v = float(action.v)

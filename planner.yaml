@@ -1,6 +1,7 @@
 action_type: differential_drive
 sensor_needs: []
 obs_policy: latest_only
+control_ack_timeout_s: 30
 
 depends:
   global_plan: true
